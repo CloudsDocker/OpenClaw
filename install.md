@@ -1,6 +1,5 @@
-# OpenClaw
-## Your own personal AI assistant
-### Official GitHub Repository
+# OpenClaw - Your own personal AI assistant
+## Official GitHub Repository
 
 <p>
   <picture>
@@ -24,7 +23,7 @@
 
 OpenClaw is a personal AI assistant you run on your own devices. It answers you on the channels you already use (WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, Microsoft Teams, WebChat), plus extension channels like BlueBubbles, Matrix, Zalo, and Zalo Personal. It can speak and listen on macOS/iOS/Android, and can render a live Canvas you control. The Gateway is just the control plane — the product is the assistant.
 
-## OpenClaw for Windows: Installation Guide
+## Installing OpenClaw on Windows
 
 ### Step 1: Open PowerShell
 Press `Win + R`, type `powershell`, and press `Enter`.
