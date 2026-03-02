@@ -30,6 +30,8 @@ if [ ! -f "${HOME}/.openclaw/openclaw.json" ]; then
   openclaw config set gateway.mode local
   openclaw config set gateway.auth.token "$TOKEN"
 fi
+# Always ensure LAN-bind and origin settings are applied
+openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
 
 # ── 4. Write Ollama auth profile ─────────────────────────────────────────────
 mkdir -p "$AGENT_DIR"

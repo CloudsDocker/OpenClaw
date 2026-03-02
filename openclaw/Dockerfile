@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g openclaw
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 18789 18791
 
