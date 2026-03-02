@@ -1,0 +1,69 @@
+services:
+
+  # ── Ollama: local LLM server with GPU ──────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: openclaw-ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - openclaw-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── Model init: pulls qwen3:14b into the ollama volume on first start ──────
+  model-init:
+    image: ollama/ollama:latest
+    container_name: openclaw-model-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/ollama", "pull", "qwen3:14b"]
+    networks:
+      - openclaw-net
+    restart: "no"
+
+  # ── OpenClaw: AI gateway + web UI ──────────────────────────────────────────
+  openclaw:
+    build:
+      context: ./openclaw
+    container_name: openclaw-gateway
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OPENCLAW_MODEL=ollama/qwen3:14b
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env}
+    volumes:
+      - openclaw-data:/root/.openclaw
+    ports:
+      # Web UI — access from Windows browser: http://<WSL-IP>:18789/#token=<your-token>
+      - "0.0.0.0:18789:18789"
+      # Browser control panel
+      - "0.0.0.0:18791:18791"
+    networks:
+      - openclaw-net
+    restart: unless-stopped
+
+networks:
+  openclaw-net:
+    driver: bridge
+
+volumes:
+  ollama-data:    # stores LLM model files (~9GB for qwen3:14b)
+  openclaw-data:  # stores openclaw config, sessions, memory
