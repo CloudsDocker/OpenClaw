@@ -155,33 +155,43 @@ base   = os.environ.get('GITHUB_BASE_BRANCH', 'master')
 
 directive = (
     "You are a personal dev assistant for " + user + ". "
-    "You have exec access to python3 and curl. "
-    "GitHub is configured via environment variables: "
-    "GITHUB_TOKEN (API token with repo scope), "
-    "GITHUB_REPO=" + repo + ", "
-    "GITHUB_USERNAME=" + user + ", "
-    "GITHUB_BASE_BRANCH=" + base + ". "
-    "GitHub API base: https://api.github.com. "
-    "Always pass Authorization header: 'token ' + os.environ['GITHUB_TOKEN']. "
-    "NEVER print the token value in any response. "
+    "CRITICAL RULE: You have the exec tool available. ALWAYS use exec to run python3 code to "
+    "interact with GitHub. NEVER describe steps, NEVER list options, NEVER say tools are missing. "
+    "Just run the code immediately and show results. "
     "\\n\\n"
-    "When asked to find latest branch / create a PR / raise PR:\\n"
-    "1. List branches: GET /repos/" + repo + "/branches (include per_page=100). "
-    "Sort by commit.commit.committer.date descending. "
-    "Skip branches named master, main, develop, staging, release*. "
-    "Pick the newest one.\\n"
-    "2. Show the branch name and its latest commit message. Confirm with me if needed.\\n"
-    "3. Create PR: POST /repos/" + repo + "/pulls with "
-    "{head: <branch>, base: '" + base + "', title: <derived from commits>, body: <summary>}.\\n"
-    "4. Compose a short, professional Slack/Teams-style review request: "
-    "'Hi team, could you review PR #N when you get a chance? [title] — [one-line what/why]. "
-    "Link: <url>'. Reply with this message so I can copy-paste it to the team."
+    "GitHub environment variables (available via os.environ in exec python3):\\n"
+    "  GITHUB_TOKEN  — API token (repo scope)\\n"
+    "  GITHUB_REPO   — " + repo + "\\n"
+    "  GITHUB_USERNAME — " + user + "\\n"
+    "  GITHUB_BASE_BRANCH — " + base + "\\n"
+    "GitHub REST API base: https://api.github.com\\n"
+    "Always add header: Authorization: token <GITHUB_TOKEN>\\n"
+    "NEVER print the token value.\\n"
+    "\\n"
+    "Common tasks — execute these immediately with exec python3:\\n"
+    "\\n"
+    "LIST MY PRs: GET /repos/" + repo + "/pulls?state=open&per_page=50 "
+    "filtered by user.login==" + user + ". Show: PR number, title, branch, URL.\\n"
+    "\\n"
+    "FIND LATEST BRANCH: GET /repos/" + repo + "/branches?per_page=100 "
+    "then for each branch GET /repos/" + repo + "/commits/<sha> to get committer date. "
+    "Skip master/main/develop/staging. Pick newest by date.\\n"
+    "\\n"
+    "CREATE PR: POST /repos/" + repo + "/pulls "
+    "body={head:<branch>, base:'" + base + "', title:<from commits>, body:<summary>}. "
+    "After creating, compose team message: "
+    "'Hi team, could you review PR #N? [title] — [one-line summary]. Link: <url>'\\n"
+    "\\n"
+    "LIST ALL BRANCHES: GET /repos/" + repo + "/branches?per_page=100"
 )
 
 # Write directive and remove any legacy 'dm' key (invalid schema key)
+# Also explicitly allow exec tool in Telegram DM context
 telegram = cfg.setdefault('channels', {}).setdefault('telegram', {})
 telegram.pop('dm', None)
-telegram.setdefault('direct', {}).setdefault('*', {})['systemPrompt'] = directive
+dm_direct = telegram.setdefault('direct', {}).setdefault('*', {})
+dm_direct['systemPrompt'] = directive
+dm_direct['tools'] = {'alsoAllow': ['exec']}
 
 with open(cfg_file, 'w') as f:
     json.dump(cfg, f, indent=2)
