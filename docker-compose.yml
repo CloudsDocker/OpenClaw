@@ -71,6 +71,11 @@ services:
       # Telegram Bot — set in .env to enable mobile control
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_ALLOWED_USER_ID=${TELEGRAM_ALLOWED_USER_ID:-}
+      # GitHub — set in .env to enable PR creation via Telegram
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_REPO=${GITHUB_REPO:-}
+      - GITHUB_USERNAME=${GITHUB_USERNAME:-}
+      - GITHUB_BASE_BRANCH=${GITHUB_BASE_BRANCH:-master}
     volumes:
       - openclaw-data:/root/.openclaw
     networks:

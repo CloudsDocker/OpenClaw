@@ -136,6 +136,58 @@ else
   echo "[openclaw] TELEGRAM_BOT_TOKEN not set — Telegram disabled"
 fi
 
+# ── 6c. GitHub PR directive — inject system prompt for Telegram DMs ──────────
+if [ -n "$GITHUB_TOKEN" ]; then
+  echo "[openclaw] Configuring GitHub PR agent directive ..."
+  python3 - << PYEOF
+import json, os
+
+cfg_file = os.path.join(os.path.expanduser('~'), '.openclaw', 'openclaw.json')
+try:
+    with open(cfg_file) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+
+repo   = os.environ.get('GITHUB_REPO', 'unknown/repo')
+user   = os.environ.get('GITHUB_USERNAME', 'unknown')
+base   = os.environ.get('GITHUB_BASE_BRANCH', 'master')
+
+directive = (
+    "You are a personal dev assistant for " + user + ". "
+    "You have exec access to python3 and curl. "
+    "GitHub is configured via environment variables: "
+    "GITHUB_TOKEN (API token with repo scope), "
+    "GITHUB_REPO=" + repo + ", "
+    "GITHUB_USERNAME=" + user + ", "
+    "GITHUB_BASE_BRANCH=" + base + ". "
+    "GitHub API base: https://api.github.com. "
+    "Always pass Authorization header: 'token ' + os.environ['GITHUB_TOKEN']. "
+    "NEVER print the token value in any response. "
+    "\\n\\n"
+    "When asked to find latest branch / create a PR / raise PR:\\n"
+    "1. List branches: GET /repos/" + repo + "/branches (include per_page=100). "
+    "Sort by commit.commit.committer.date descending. "
+    "Skip branches named master, main, develop, staging, release*. "
+    "Pick the newest one.\\n"
+    "2. Show the branch name and its latest commit message. Confirm with me if needed.\\n"
+    "3. Create PR: POST /repos/" + repo + "/pulls with "
+    "{head: <branch>, base: '" + base + "', title: <derived from commits>, body: <summary>}.\\n"
+    "4. Compose a short, professional Slack/Teams-style review request: "
+    "'Hi team, could you review PR #N when you get a chance? [title] — [one-line what/why]. "
+    "Link: <url>'. Reply with this message so I can copy-paste it to the team."
+)
+
+cfg.setdefault('channels', {}).setdefault('telegram', {}).setdefault('dm', {})['systemPrompt'] = directive
+
+with open(cfg_file, 'w') as f:
+    json.dump(cfg, f, indent=2)
+print('[openclaw] GitHub PR directive written to openclaw.json')
+PYEOF
+else
+  echo "[openclaw] GITHUB_TOKEN not set — GitHub PR workflow disabled"
+fi
+
 # ── 7. Set default model ─────────────────────────────────────────────────────
 openclaw models set "$MODEL" 2>/dev/null || true
 
