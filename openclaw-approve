@@ -1,0 +1,12 @@
+#!/bin/sh
+REQUEST_ID=$(docker exec openclaw-gateway openclaw devices list 2>/dev/null \
+  | awk '/^Pending/,/^Paired/' \
+  | grep -oP '[a-f0-9-]{36}' \
+  | head -1)
+
+if [ -z "$REQUEST_ID" ]; then
+  echo "No pending pairing requests."
+else
+  echo "Approving $REQUEST_ID ..."
+  docker exec openclaw-gateway openclaw devices approve "$REQUEST_ID"
+fi

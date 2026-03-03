@@ -1,0 +1,14 @@
+{
+  local_certs
+}
+
+localhost:18790, 127.0.0.1:18790, 172.25.75.125:18790 {
+  tls internal
+
+  reverse_proxy openclaw-gateway:18789 {
+    header_up Host {upstream_hostport}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto https
+  }
+}

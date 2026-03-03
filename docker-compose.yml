@@ -47,15 +47,29 @@ services:
         condition: service_healthy
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_API_KEY=ollama-local
       - OPENCLAW_MODEL=ollama/qwen3:14b
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env}
     volumes:
       - openclaw-data:/root/.openclaw
+    networks:
+      - openclaw-net
+    restart: unless-stopped
+
+  # ── Caddy: HTTPS reverse proxy (required for browser secure context) ────────
+  caddy:
+    image: caddy:latest
+    container_name: openclaw-caddy
+    depends_on:
+      - openclaw
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
     ports:
-      # Web UI — access from Windows browser: http://<WSL-IP>:18789/#token=<your-token>
-      - "0.0.0.0:18789:18789"
-      # Browser control panel
-      - "0.0.0.0:18791:18791"
+      # HTTPS — access from Windows: https://<WSL-IP>:18790/#token=<your-token>
+      - "0.0.0.0:18790:18790"
     networks:
       - openclaw-net
     restart: unless-stopped
@@ -67,3 +81,5 @@ networks:
 volumes:
   ollama-data:    # stores LLM model files (~9GB for qwen3:14b)
   openclaw-data:  # stores openclaw config, sessions, memory
+  caddy-data:     # stores Caddy TLS certificates
+  caddy-config:   # stores Caddy runtime config

@@ -1,0 +1,21 @@
+# Secret — never commit your gateway token
+.env
+
+# Claude Code session data
+.claude/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Docker build cache
+openclaw/.dockerignore
+
+# OpenClaw app internal files (not part of this Docker stack)
+CHANGELOG.md
+appcast.xml
+install.md
