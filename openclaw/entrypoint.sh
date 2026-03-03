@@ -178,7 +178,10 @@ directive = (
     "Link: <url>'. Reply with this message so I can copy-paste it to the team."
 )
 
-cfg.setdefault('channels', {}).setdefault('telegram', {}).setdefault('dm', {})['systemPrompt'] = directive
+# Write directive and remove any legacy 'dm' key (invalid schema key)
+telegram = cfg.setdefault('channels', {}).setdefault('telegram', {})
+telegram.pop('dm', None)
+telegram.setdefault('direct', {}).setdefault('*', {})['systemPrompt'] = directive
 
 with open(cfg_file, 'w') as f:
     json.dump(cfg, f, indent=2)
