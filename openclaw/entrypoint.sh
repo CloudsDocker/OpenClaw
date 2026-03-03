@@ -195,7 +195,8 @@ directive = (
 # Also explicitly allow exec tool in Telegram DM context
 telegram = cfg.setdefault('channels', {}).setdefault('telegram', {})
 telegram.pop('dm', None)
-dm_direct = telegram.setdefault('direct', {}).setdefault('*', {})
+user_id = os.environ.get('TELEGRAM_ALLOWED_USER_ID', '*')
+dm_direct = telegram.setdefault('direct', {}).setdefault(user_id, {})
 dm_direct['systemPrompt'] = directive
 dm_direct['tools'] = {'alsoAllow': ['exec']}
 
