@@ -34,6 +34,20 @@ fi
 openclaw config set gateway.auth.mode token 2>/dev/null || true
 openclaw config set gateway.controlUi.allowedOrigins '["https://localhost:18790","https://172.25.75.125:18790"]' 2>/dev/null || true
 
+# ── 3b. Exec tool — allow safe binaries the agent may call ───────────────────
+openclaw config set tools.exec.security allowlist 2>/dev/null || true
+openclaw config set tools.exec.safeBins '["curl","python3"]' 2>/dev/null || true
+
+# ── 3c. Web search (Brave) ────────────────────────────────────────────────────
+if [ -n "$BRAVE_API_KEY" ]; then
+  echo "[openclaw] Configuring Brave web search ..."
+  openclaw config set tools.web.search.provider brave 2>/dev/null || true
+  openclaw config set tools.web.search.apiKey "$BRAVE_API_KEY" 2>/dev/null || true
+  echo "[openclaw] Web search enabled (Brave)"
+else
+  echo "[openclaw] BRAVE_API_KEY not set — web search disabled"
+fi
+
 # ── 4. Write Ollama auth profile ─────────────────────────────────────────────
 mkdir -p "$AGENT_DIR"
 cat > "$AGENT_DIR/auth-profiles.json" << EOF
@@ -73,17 +87,20 @@ except Exception as e:
 model_entries = []
 for m in tags:
     name = m.get("name", "")
-    details = m.get("details", {})
-    ctx = 32768  # safe default
-    model_entries.append({
+    # qwen3:14b-fast — smaller context, thinking disabled via providerOptions
+    is_fast = name == "qwen3:14b-fast"
+    entry = {
         "id":            name,
         "name":          name,
         "reasoning":     False,
         "input":         ["text"],
         "cost":          {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-        "contextWindow": ctx,
-        "maxTokens":     8192,
-    })
+        "contextWindow": 8192 if is_fast else 32768,
+        "maxTokens":     4096 if is_fast else 8192,
+    }
+    if is_fast:
+        entry["providerOptions"] = {"ollama": {"think": False}}
+    model_entries.append(entry)
 
 ollama = data.setdefault("providers", {}).setdefault("ollama", {})
 ollama["baseUrl"] = "$OLLAMA_URL"
@@ -101,7 +118,25 @@ with open(models_file, "w") as f:
 print(f"[openclaw] Registered {len(model_entries)} Ollama model(s): {[m['id'] for m in model_entries]}")
 PYEOF
 
-# ── 6. Set default model ─────────────────────────────────────────────────────
+# ── 6b. Telegram channel ─────────────────────────────────────────────────────
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+  echo "[openclaw] Configuring Telegram bot ..."
+  openclaw channels add \
+    --channel telegram \
+    --token "$TELEGRAM_BOT_TOKEN" 2>/dev/null || true
+
+  # Restrict to your Telegram user ID only (set allowFrom before dmPolicy)
+  if [ -n "$TELEGRAM_ALLOWED_USER_ID" ]; then
+    openclaw config set channels.telegram.allowFrom \
+      "[\"$TELEGRAM_ALLOWED_USER_ID\"]" 2>/dev/null || true
+    openclaw config set channels.telegram.dmPolicy allowlist 2>/dev/null || true
+  fi
+  echo "[openclaw] Telegram bot configured"
+else
+  echo "[openclaw] TELEGRAM_BOT_TOKEN not set — Telegram disabled"
+fi
+
+# ── 7. Set default model ─────────────────────────────────────────────────────
 openclaw models set "$MODEL" 2>/dev/null || true
 
 # ── 7. Start background model-watcher — re-patches models.json if wiped ──────
@@ -116,40 +151,82 @@ openclaw models set "$MODEL" 2>/dev/null || true
 import json, urllib.request, sys
 f = '$MODELS_FILE'
 try:
-    data = json.load(open(f))
-except Exception:
-    data = {}
-ollama = data.get('providers', {}).get('ollama', {})
-if ollama.get('models'):
-    sys.exit(0)  # models already registered, nothing to do
-try:
     tags = json.load(urllib.request.urlopen('$OLLAMA/api/tags', timeout=5)).get('models', [])
 except Exception:
     sys.exit(0)
 if not tags:
     sys.exit(0)
-entries = [{'id':m['name'],'name':m['name'],'reasoning':False,'input':['text'],'cost':{'input':0,'output':0,'cacheRead':0,'cacheWrite':0},'contextWindow':32768,'maxTokens':8192} for m in tags]
+try:
+    data = json.load(open(f))
+except Exception:
+    data = {}
+# Build desired entries with providerOptions for qwen3:14b-fast
+entries = []
+for m in tags:
+    n = m['name']
+    fast = n == 'qwen3:14b-fast'
+    e = {'id':n,'name':n,'reasoning':False,'input':['text'],'cost':{'input':0,'output':0,'cacheRead':0,'cacheWrite':0},'contextWindow':8192 if fast else 32768,'maxTokens':4096 if fast else 8192}
+    if fast:
+        e['providerOptions'] = {'ollama': {'think': False}}
+    entries.append(e)
+# Only write if something changed (avoid thrashing)
+ollama = data.get('providers', {}).get('ollama', {})
+existing = {m.get('id'): m for m in ollama.get('models', [])}
+needs_update = any(existing.get(e['id'], {}).get('providerOptions') != e.get('providerOptions') or existing.get(e['id'], {}).get('contextWindow') != e.get('contextWindow') for e in entries) or not ollama.get('models')
+if not needs_update:
+    sys.exit(0)
 data.setdefault('providers',{}).setdefault('ollama',{}).update({'baseUrl':'$OLLAMA','api':'ollama','apiKey':'ollama-local','models':entries})
 json.dump(data, open(f,'w'), indent=2)
-print('[openclaw] model-watcher: restored', [e['id'] for e in entries])
+print('[openclaw] model-watcher: patched', [e['id'] for e in entries])
 " 2>&1 || true
   done
 ) &
 
-# ── 8. TCP proxy: localhost:11434 → ollama:11434 ──────────────────────────────
+# ── 8. HTTP proxy: localhost:11434 → ollama:11434 ────────────────────────────
 # The gateway's Ollama auto-discovery is hardcoded to http://localhost:11434.
-# This proxy makes that address work without changing the gateway.
+# This HTTP proxy fixes that AND injects think:false for *-fast models so
+# qwen3 does not generate internal reasoning tokens (44x speed improvement).
 node -e "
-const net = require('net');
-const server = net.createServer(function(src) {
-  const dst = net.connect(11434, 'ollama');
-  src.pipe(dst); dst.pipe(src);
-  src.on('error', function(){}); dst.on('error', function(){});
+const http = require('http');
+const server = http.createServer(function(req, res) {
+  var chunks = [];
+  req.on('data', function(c) { chunks.push(c); });
+  req.on('end', function() {
+    var rawBody = Buffer.concat(chunks);
+    var body = rawBody;
+    if (req.method === 'POST' && req.url === '/api/chat') {
+      try {
+        var parsed = JSON.parse(rawBody.toString());
+        if (parsed.model && parsed.model.indexOf('-fast') !== -1 && parsed.think === undefined) {
+          parsed.think = false;
+          body = Buffer.from(JSON.stringify(parsed));
+        }
+      } catch(e) {}
+    }
+    var opts = {
+      hostname: 'ollama', port: 11434,
+      path: req.url, method: req.method,
+      headers: Object.assign({}, req.headers, {
+        host: 'ollama:11434',
+        'content-length': body.length
+      })
+    };
+    var proxy = http.request(opts, function(pr) {
+      res.writeHead(pr.statusCode, pr.headers);
+      pr.pipe(res);
+    });
+    proxy.on('error', function(e) {
+      if (!res.headersSent) res.writeHead(502);
+      res.end('proxy error: ' + e.message);
+    });
+    proxy.write(body);
+    proxy.end();
+  });
+  req.on('error', function() {});
 });
 server.listen(11434, '127.0.0.1', function() {
-  process.stdout.write('[openclaw] proxy: localhost:11434 -> ollama:11434\n');
+  process.stdout.write('[openclaw] http-proxy: localhost:11434 -> ollama:11434 (think:false for fast models)\n');
 });
-// Keep running
 setInterval(function(){}, 1 << 30);
 " &
 

@@ -11,6 +11,11 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    environment:
+      - OLLAMA_FLASH_ATTENTION=1       # faster attention ops on RTX 5080
+      - OLLAMA_KV_CACHE_TYPE=q8_0      # quantise KV cache → less VRAM, more context
+      - OLLAMA_KEEP_ALIVE=-1           # keep model loaded forever (no reload delay)
+      - OLLAMA_NUM_PARALLEL=1          # single user — focus all resources on 1 request
     volumes:
       - ollama-data:/root/.ollama
     networks:
@@ -23,7 +28,7 @@ services:
       retries: 10
       start_period: 15s
 
-  # ── Model init: pulls qwen3:14b into the ollama volume on first start ──────
+  # ── Model init: pulls qwen3:14b and creates a fast no-think variant ─────────
   model-init:
     image: ollama/ollama:latest
     container_name: openclaw-model-init
@@ -32,7 +37,17 @@ services:
         condition: service_healthy
     environment:
       - OLLAMA_HOST=http://ollama:11434
-    entrypoint: ["/bin/ollama", "pull", "qwen3:14b"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /bin/ollama pull qwen3:14b
+        cat > /tmp/Modelfile << 'EOF'
+        FROM qwen3:14b
+        PARAMETER num_ctx 8192
+        EOF
+        /bin/ollama create qwen3:14b-fast -f /tmp/Modelfile
+        echo "Model qwen3:14b-fast ready (thinking disabled, ctx=8192)"
     networks:
       - openclaw-net
     restart: "no"
@@ -49,8 +64,13 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_API_KEY=ollama-local
-      - OPENCLAW_MODEL=ollama/qwen3:14b
+      - OPENCLAW_MODEL=ollama/qwen3:14b-fast
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env}
+      # Optional: set BRAVE_API_KEY in .env to enable web search
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      # Telegram Bot — set in .env to enable mobile control
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_ALLOWED_USER_ID=${TELEGRAM_ALLOWED_USER_ID:-}
     volumes:
       - openclaw-data:/root/.openclaw
     networks:
