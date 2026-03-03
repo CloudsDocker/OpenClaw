@@ -55,7 +55,8 @@ services:
   # ── OpenClaw: AI gateway + web UI ──────────────────────────────────────────
   openclaw:
     build:
-      context: ./openclaw
+      context: .
+      dockerfile: openclaw/Dockerfile
     container_name: openclaw-gateway
     depends_on:
       ollama:

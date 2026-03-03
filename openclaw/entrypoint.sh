@@ -38,8 +38,8 @@ openclaw config set gateway.controlUi.allowedOrigins '["https://localhost:18790"
 openclaw config set tools.exec.security allowlist 2>/dev/null || true
 openclaw config set tools.exec.safeBins '["curl","python3"]' 2>/dev/null || true
 # Empty profiles = no flag restrictions; required or the binaries are silently ignored
-openclaw config set tools.exec.safeBinProfiles.curl '{}' 2>/dev/null || true
-openclaw config set tools.exec.safeBinProfiles.python3 '{}' 2>/dev/null || true
+openclaw config set tools.exec.safeBinProfiles.curl '{"allowedValueFlags":["-H","-X","-d","-o","-s","-f","-L","-u","-A","-b","-c","-e","--header","--request","--data","--output","--silent","--fail","--location","--user","--user-agent","--cookie","--cookie-jar","--referer","--max-time","--connect-timeout","-m","--url"]}' 2>/dev/null || true
+openclaw config set tools.exec.safeBinProfiles.python3 '{"allowedValueFlags":["-c","-m","-u","-W","-E"]}' 2>/dev/null || true
 # Run exec in gateway process (not sandbox) and never ask for approval via channel
 openclaw config set tools.exec.host gateway 2>/dev/null || true
 openclaw config set tools.exec.ask off 2>/dev/null || true
@@ -58,6 +58,29 @@ fi
 mkdir -p "$AGENT_DIR"
 WORKSPACE_DIR="${HOME}/.openclaw/workspace"
 mkdir -p "$WORKSPACE_DIR"
+
+# ── Seed workspace files from image on first start (skip if already present) ──
+if [ -d "/workspace-seed" ]; then
+  for f in /workspace-seed/*.md; do
+    name=$(basename "$f")
+    if [ ! -f "$WORKSPACE_DIR/$name" ]; then
+      cp "$f" "$WORKSPACE_DIR/$name"
+      echo "[openclaw] Seeded workspace/$name"
+    fi
+  done
+  if [ -d "/workspace-seed/memory" ]; then
+    mkdir -p "$WORKSPACE_DIR/../memory"
+    for f in /workspace-seed/memory/*.md; do
+      [ -f "$f" ] || continue
+      name=$(basename "$f")
+      dest="$WORKSPACE_DIR/../memory/$name"
+      if [ ! -f "$dest" ]; then
+        cp "$f" "$dest"
+        echo "[openclaw] Seeded memory/$name"
+      fi
+    done
+  fi
+fi
 
 # ── 4a. Write TOOLS.md — GitHub access + code templates for the agent ─────────
 if [ -n "$GITHUB_TOKEN" ]; then
