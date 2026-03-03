@@ -56,6 +56,64 @@ fi
 
 # ── 4. Write Ollama auth profile ─────────────────────────────────────────────
 mkdir -p "$AGENT_DIR"
+WORKSPACE_DIR="${HOME}/.openclaw/workspace"
+mkdir -p "$WORKSPACE_DIR"
+
+# ── 4a. Write TOOLS.md — GitHub access + code templates for the agent ─────────
+if [ -n "$GITHUB_TOKEN" ]; then
+python3 - << PYEOF
+import os
+repo = os.environ['GITHUB_REPO']
+user = os.environ['GITHUB_USERNAME']
+base = os.environ.get('GITHUB_BASE_BRANCH', 'master')
+
+content = """# TOOLS.md - Local Notes
+
+Skills define _how_ tools work. This file is for specifics unique to this setup.
+
+## GitHub
+
+Full GitHub API access is configured. **When asked about GitHub PRs or branches: call exec with python3 immediately — never describe steps or ask the user to manually do anything.**
+
+These env vars are available in exec python3:
+- GITHUB_TOKEN: set (repo scope, SSO authorized)
+- GITHUB_REPO: """ + repo + """
+- GITHUB_USERNAME: """ + user + """
+- GITHUB_BASE_BRANCH: """ + base + """
+
+### List my open PRs — exec this immediately:
+
+import os, urllib.request, json
+h = {"Authorization": "token " + os.environ["GITHUB_TOKEN"], "Accept": "application/vnd.github+json"}
+prs = json.load(urllib.request.urlopen(urllib.request.Request(
+    "https://api.github.com/repos/" + os.environ["GITHUB_REPO"] + "/pulls?state=open&per_page=50", headers=h)))
+mine = [p for p in prs if p["user"]["login"] == os.environ["GITHUB_USERNAME"]]
+for p in mine:
+    print("#" + str(p["number"]) + ": " + p["title"] + "  " + p["head"]["ref"] + "  " + p["html_url"])
+
+### Find my latest branch (skip master/main/develop/staging) — exec this immediately:
+
+import os, urllib.request, json
+h = {"Authorization": "token " + os.environ["GITHUB_TOKEN"], "Accept": "application/vnd.github+json"}
+bs = json.load(urllib.request.urlopen(urllib.request.Request(
+    "https://api.github.com/repos/" + os.environ["GITHUB_REPO"] + "/branches?per_page=100", headers=h)))
+skip = {"master", "main", "develop", "staging"}
+results = []
+for b in bs:
+    if b["name"] in skip: continue
+    c = json.load(urllib.request.urlopen(urllib.request.Request(
+        "https://api.github.com/repos/" + os.environ["GITHUB_REPO"] + "/commits/" + b["commit"]["sha"], headers=h)))
+    results.append((c["commit"]["committer"]["date"], b["name"]))
+results.sort(reverse=True)
+for d, n in results[:5]:
+    print(d + " " + n)
+"""
+
+with open(os.path.expanduser("~/.openclaw/workspace/TOOLS.md"), "w") as f:
+    f.write(content)
+print("[openclaw] TOOLS.md written with GitHub access config")
+PYEOF
+fi
 cat > "$AGENT_DIR/auth-profiles.json" << EOF
 {
   "version": 1,
