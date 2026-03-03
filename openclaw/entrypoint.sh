@@ -37,6 +37,12 @@ openclaw config set gateway.controlUi.allowedOrigins '["https://localhost:18790"
 # ── 3b. Exec tool — allow safe binaries the agent may call ───────────────────
 openclaw config set tools.exec.security allowlist 2>/dev/null || true
 openclaw config set tools.exec.safeBins '["curl","python3"]' 2>/dev/null || true
+# Empty profiles = no flag restrictions; required or the binaries are silently ignored
+openclaw config set tools.exec.safeBinProfiles.curl '{}' 2>/dev/null || true
+openclaw config set tools.exec.safeBinProfiles.python3 '{}' 2>/dev/null || true
+# Run exec in gateway process (not sandbox) and never ask for approval via channel
+openclaw config set tools.exec.host gateway 2>/dev/null || true
+openclaw config set tools.exec.ask off 2>/dev/null || true
 
 # ── 3c. Web search (Brave) ────────────────────────────────────────────────────
 if [ -n "$BRAVE_API_KEY" ]; then
