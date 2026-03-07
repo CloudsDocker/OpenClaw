@@ -35,8 +35,11 @@ openclaw config set gateway.auth.mode token 2>/dev/null || true
 openclaw config set gateway.controlUi.allowedOrigins '["https://localhost:18790","https://172.25.75.125:18790"]' 2>/dev/null || true
 
 # ── 3b. Exec tool — allow safe binaries the agent may call ───────────────────
-openclaw config set tools.exec.security allowlist 2>/dev/null || true
-openclaw config set tools.exec.safeBins '["curl","python3"]' 2>/dev/null || true
+openclaw config set tools.exec.security full 2>/dev/null || true
+openclaw config set tools.exec.safeBins '["curl","python3","git"]' 2>/dev/null || true
+openclaw config set tools.exec.safeBinProfiles.git '{"allowedValueFlags":["-C","--work-tree","--git-dir","--no-pager","log","status","diff","push","pull","fetch","branch","checkout","rev-parse","--abbrev-ref","HEAD","--oneline","--stat","-n","--decorate","--all","-10","-20"]}' 2>/dev/null || true
+# Allow git to operate on bind-mounted host repos (different uid ownership)
+git config --global --add safe.directory /root/ws/todd/tfnsw/azure-devops-pipeline-template 2>/dev/null || true
 # Empty profiles = no flag restrictions; required or the binaries are silently ignored
 openclaw config set tools.exec.safeBinProfiles.curl '{"allowedValueFlags":["-H","-X","-d","-o","-s","-f","-L","-u","-A","-b","-c","-e","--header","--request","--data","--output","--silent","--fail","--location","--user","--user-agent","--cookie","--cookie-jar","--referer","--max-time","--connect-timeout","-m","--url"]}' 2>/dev/null || true
 openclaw config set tools.exec.safeBinProfiles.python3 '{"allowedValueFlags":["-c","-m","-u","-W","-E"]}' 2>/dev/null || true
@@ -136,6 +139,124 @@ with open(os.path.expanduser("~/.openclaw/workspace/TOOLS.md"), "w") as f:
     f.write(content)
 print("[openclaw] TOOLS.md written with GitHub access config")
 PYEOF
+
+# ── Append Weather + TfNSW sections (quoted heredoc — safe for backticks) ────
+cat >> "${HOME}/.openclaw/workspace/TOOLS.md" << 'TOOLS_APPEND'
+
+## Weather
+
+**Location:** Killara, Sydney, Australia (lat=-33.775, lon=151.163)
+**IMPORTANT: NEVER guess or hallucinate weather data. Always fetch it using exec python3.**
+
+When asked about weather (current, today, tomorrow, this week) — exec this immediately:
+
+```python
+import urllib.request, json
+lat, lon = -33.775, 151.163
+url = (
+    "https://api.open-meteo.com/v1/forecast"
+    f"?latitude={lat}&longitude={lon}"
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,uv_index_max"
+    "&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m"
+    "&timezone=Australia%2FSydney&forecast_days=7"
+)
+data = json.load(urllib.request.urlopen(url))
+wmo = {0:"Clear sky",1:"Mainly clear",2:"Partly cloudy",3:"Overcast",45:"Foggy",48:"Icy fog",
+       51:"Light drizzle",53:"Drizzle",55:"Heavy drizzle",61:"Light rain",63:"Rain",65:"Heavy rain",
+       71:"Light snow",73:"Snow",75:"Heavy snow",80:"Light showers",81:"Showers",82:"Heavy showers",
+       95:"Thunderstorm",96:"Thunderstorm w/ hail",99:"Thunderstorm w/ heavy hail"}
+cur = data["current"]
+print(f"NOW: {cur['temperature_2m']}C, {wmo.get(cur['weather_code'],'?')}, wind {cur['wind_speed_10m']} km/h, humidity {cur['relative_humidity_2m']}%")
+print()
+for i, date in enumerate(data["daily"]["time"]):
+    code = data["daily"]["weather_code"][i]
+    hi = data["daily"]["temperature_2m_max"][i]
+    lo = data["daily"]["temperature_2m_min"][i]
+    rain = data["daily"]["precipitation_sum"][i]
+    wind = data["daily"]["wind_speed_10m_max"][i]
+    uv = data["daily"]["uv_index_max"][i]
+    label = ["Today","Tomorrow"][i] if i < 2 else date
+    print(f"{label}: {lo}-{hi}C, {wmo.get(code,'?')}, rain {rain}mm, wind {wind} km/h, UV {uv}")
+```
+
+## TfNSW — Azure DevOps Git Operations
+
+**Repos are cloned under:** ~/ws/todd/tfnsw/
+**Available repos:** azure-devops-pipeline-template (ADO pipeline templates)
+**ADO:** Org=EAPlatformServices  Project=PlatformServices
+
+**CRITICAL: When asked for ANY git operation (log, status, push, PR, branch list) — exec python3 with subprocess immediately. NEVER describe steps or say you cannot access the filesystem.**
+
+### List repos — exec this immediately:
+```python
+import subprocess, os
+base = os.path.expanduser("~/ws/todd/tfnsw")
+result = subprocess.run(["ls", "-la", base], capture_output=True, text=True)
+print(result.stdout or result.stderr)
+```
+
+### Git log — exec this immediately:
+```python
+import subprocess, os
+repo = os.path.expanduser("~/ws/todd/tfnsw/azure-devops-pipeline-template")
+result = subprocess.run(["git", "-C", repo, "log", "--oneline", "-10"], capture_output=True, text=True)
+print(result.stdout or result.stderr)
+```
+
+### Git status / pending changes — exec this immediately:
+```python
+import subprocess, os
+repo = os.path.expanduser("~/ws/todd/tfnsw/azure-devops-pipeline-template")
+for cmd in [["git", "-C", repo, "status"], ["git", "-C", repo, "diff", "--stat"]]:
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    print(r.stdout or r.stderr)
+```
+
+### Git push — exec this immediately:
+```python
+import subprocess, os
+repo = os.path.expanduser("~/ws/todd/tfnsw/azure-devops-pipeline-template")
+result = subprocess.run(["git", "-C", repo, "push"], capture_output=True, text=True)
+print(result.stdout + result.stderr)
+```
+
+### Create ADO Pull Request — exec this immediately:
+```python
+import subprocess, json, urllib.request, urllib.error, os, base64
+PAT = os.environ.get("ADO_PAT", "")
+org, proj, repo_name = "EAPlatformServices", "PlatformServices", "azure-devops-pipeline-template"
+repo_path = os.path.expanduser("~/ws/todd/tfnsw/" + repo_name)
+branch = subprocess.run(["git", "-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
+    capture_output=True, text=True).stdout.strip()
+url = f"https://dev.azure.com/{org}/{proj}/_apis/git/repositories/{repo_name}/pullrequests?api-version=7.1"
+payload = json.dumps({
+    "sourceRefName": f"refs/heads/{branch}",
+    "targetRefName": "refs/heads/PRD",
+    "title": "TITLE",
+    "description": "DESCRIPTION"
+}).encode()
+token = base64.b64encode(f":{PAT}".encode()).decode()
+req = urllib.request.Request(url, data=payload,
+    headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"})
+pr = json.load(urllib.request.urlopen(req))
+print(f"PR #{pr['pullRequestId']}: {pr['title']}")
+print(pr['url'].replace('_apis/git/repositories', '_git').replace('/pullrequests/', '/pullrequest/'))
+```
+
+### List open PRs — exec this immediately:
+```python
+import urllib.request, json, os, base64
+PAT = os.environ.get("ADO_PAT", "")
+org, proj, repo_name = "EAPlatformServices", "PlatformServices", "azure-devops-pipeline-template"
+url = f"https://dev.azure.com/{org}/{proj}/_apis/git/repositories/{repo_name}/pullrequests?searchCriteria.status=active&api-version=7.1"
+token = base64.b64encode(f":{PAT}".encode()).decode()
+req = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})
+prs = json.load(urllib.request.urlopen(req))
+for pr in prs["value"]:
+    print(f"PR #{pr['pullRequestId']}: {pr['title']}  [{pr['sourceRefName'].split('/')[-1]} -> {pr['targetRefName'].split('/')[-1]}]")
+```
+TOOLS_APPEND
+echo "[openclaw] Weather + TfNSW sections appended to TOOLS.md"
 fi
 cat > "$AGENT_DIR/auth-profiles.json" << EOF
 {
@@ -241,35 +362,37 @@ user   = os.environ.get('GITHUB_USERNAME', 'unknown')
 base   = os.environ.get('GITHUB_BASE_BRANCH', 'master')
 
 directive = (
-    "You are a personal dev assistant for " + user + ". "
-    "CRITICAL RULE: You have the exec tool available. ALWAYS use exec to run python3 code to "
-    "interact with GitHub. NEVER describe steps, NEVER list options, NEVER say tools are missing. "
-    "Just run the code immediately and show results. "
+    "You are a personal dev assistant. "
     "\\n\\n"
-    "GitHub environment variables (available via os.environ in exec python3):\\n"
-    "  GITHUB_TOKEN  — API token (repo scope)\\n"
-    "  GITHUB_REPO   — " + repo + "\\n"
-    "  GITHUB_USERNAME — " + user + "\\n"
-    "  GITHUB_BASE_BRANCH — " + base + "\\n"
-    "GitHub REST API base: https://api.github.com\\n"
-    "Always add header: Authorization: token <GITHUB_TOKEN>\\n"
+    "## THE ONE RULE THAT OVERRIDES EVERYTHING ELSE\\n"
+    "You have the exec tool. For ANY question about files, folders, git, repos, weather, GitHub, or system state: "
+    "USE EXEC PYTHON3 IMMEDIATELY and show the real output. "
+    "NEVER say you cannot access the filesystem. "
+    "NEVER describe commands for the user to run themselves. "
+    "NEVER list options or ask clarifying questions when you can just run the code. "
+    "Just execute and show results.\\n"
+    "\\n"
+    "## File system & Git (TfNSW repos)\\n"
+    "Repos live at: ~/ws/todd/tfnsw/\\n"
+    "To list repos: exec python3 -> import subprocess,os; r=subprocess.run(['ls','-la',os.path.expanduser('~/ws/todd/tfnsw')],capture_output=True,text=True); print(r.stdout)\\n"
+    "To git log:    exec python3 -> subprocess with ['git','-C',<repo_path>,'log','--oneline','-10']\\n"
+    "To git status: exec python3 -> subprocess with ['git','-C',<repo_path>,'status']\\n"
+    "To git push:   exec python3 -> subprocess with ['git','-C',<repo_path>,'push']\\n"
+    "ADO_PAT env var is set for Azure DevOps API calls.\\n"
+    "ADO org=EAPlatformServices project=PlatformServices\\n"
+    "\\n"
+    "## GitHub\\n"
+    "GITHUB_TOKEN, GITHUB_REPO=" + repo + ", GITHUB_USERNAME=" + user + ", GITHUB_BASE_BRANCH=" + base + "\\n"
+    "GitHub REST API: https://api.github.com — always use Authorization: token <GITHUB_TOKEN>\\n"
+    "LIST MY PRs: GET /repos/" + repo + "/pulls?state=open&per_page=50 filtered by user.login==" + user + "\\n"
+    "CREATE PR: POST /repos/" + repo + "/pulls with head, base, title, body\\n"
     "NEVER print the token value.\\n"
     "\\n"
-    "Common tasks — execute these immediately with exec python3:\\n"
+    "## Weather\\n"
+    "NEVER guess weather. Use exec python3 to call Open-Meteo API. Location and code template are in TOOLS.md.\\n"
     "\\n"
-    "LIST MY PRs: GET /repos/" + repo + "/pulls?state=open&per_page=50 "
-    "filtered by user.login==" + user + ". Show: PR number, title, branch, URL.\\n"
-    "\\n"
-    "FIND LATEST BRANCH: GET /repos/" + repo + "/branches?per_page=100 "
-    "then for each branch GET /repos/" + repo + "/commits/<sha> to get committer date. "
-    "Skip master/main/develop/staging. Pick newest by date.\\n"
-    "\\n"
-    "CREATE PR: POST /repos/" + repo + "/pulls "
-    "body={head:<branch>, base:'" + base + "', title:<from commits>, body:<summary>}. "
-    "After creating, compose team message: "
-    "'Hi team, could you review PR #N? [title] — [one-line summary]. Link: <url>'\\n"
-    "\\n"
-    "LIST ALL BRANCHES: GET /repos/" + repo + "/branches?per_page=100"
+    "## Format\\n"
+    "Reply concisely. No markdown headers in Telegram. Use plain text and short bullet lines."
 )
 
 # Write directive and remove any legacy 'dm' key (invalid schema key)

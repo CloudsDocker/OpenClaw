@@ -65,7 +65,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_API_KEY=ollama-local
-      - OPENCLAW_MODEL=ollama/qwen3:14b-fast
+      - OPENCLAW_MODEL=ollama/qwen3:14b
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in .env}
       # Optional: set BRAVE_API_KEY in .env to enable web search
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
@@ -77,8 +77,11 @@ services:
       - GITHUB_REPO=${GITHUB_REPO:-}
       - GITHUB_USERNAME=${GITHUB_USERNAME:-}
       - GITHUB_BASE_BRANCH=${GITHUB_BASE_BRANCH:-master}
+      # Azure DevOps (TfNSW) — set in .env for git operations via Telegram
+      - ADO_PAT=${ADO_PAT:-}
     volumes:
       - openclaw-data:/root/.openclaw
+      - /home/phray/ws/todd/tfnsw:/root/ws/todd/tfnsw   # TfNSW repos (git ops via Telegram)
     networks:
       - openclaw-net
     restart: unless-stopped
