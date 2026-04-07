@@ -156,8 +156,27 @@ for d, n in results[:5]:
     print(d + " " + n)
 """
 
+actions_section = (
+'\n## GitHub Actions\n\n'
+'SHORTCUT: exec python3 /root/.openclaw/workspace/gh_actions.py\n'
+'For a different repo: exec python3 /root/.openclaw/workspace/gh_actions.py owner/repo\n\n'
+'Default repo: ' + repo + '\n\n'
+'### Approve a waiting Actions run — exec python3 with this code:\n\n'
+'import os, urllib.request\n'
+"token  = os.environ['GITHUB_TOKEN']\n"
+"repo_a = 'qantasloyalty/edr-airflow-dags'\n"
+"run_id = '12345678'\n"
+"h = {'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json', 'Content-Length': '0'}\n"
+"req = urllib.request.Request('https://api.github.com/repos/' + repo_a + '/actions/runs/' + run_id + '/approve', data=b'', headers=h, method='POST')\n"
+'try:\n'
+'    urllib.request.urlopen(req)\n'
+"    print('Approved run ' + run_id)\n"
+'except Exception as e:\n'
+"    print('Error: ' + str(e))\n"
+)
+
 with open(os.path.expanduser("~/.openclaw/workspace/TOOLS.md"), "w") as f:
-    f.write(content)
+    f.write(content + actions_section)
 print("[openclaw] TOOLS.md written with GitHub access config")
 PYEOF
 
@@ -280,7 +299,29 @@ TOOLS_APPEND
 echo "[openclaw] Weather + TfNSW sections appended to TOOLS.md"
 fi
 
-# ── 4b. Append Jira section to TOOLS.md ──────────────────────────────────────
+# ── 4b. Write pre-built helper scripts into workspace ────────────────────────
+# gh_actions.py: list my waiting GitHub Actions runs — agent calls this directly
+if [ -n "$GITHUB_TOKEN" ]; then
+cat > "${HOME}/.openclaw/workspace/gh_actions.py" << GHSCRIPT
+import os, sys, urllib.request, json, urllib.parse
+token = os.environ['GITHUB_TOKEN']
+user  = os.environ['GITHUB_USERNAME']
+repo  = sys.argv[1] if len(sys.argv) > 1 else 'qantasloyalty/edr-airflow-dags'
+h = {'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json'}
+params = urllib.parse.urlencode({'actor': user, 'branch': 'master', 'status': 'waiting', 'per_page': 30})
+url = 'https://api.github.com/repos/' + repo + '/actions/runs?' + params
+data = json.load(urllib.request.urlopen(urllib.request.Request(url, headers=h)))
+runs = data.get('workflow_runs', [])
+print('Waiting runs for ' + repo + ' (actor=' + user + '): ' + str(len(runs)))
+for r in runs:
+    title = r['head_commit']['message'].split('\n')[0]
+    print('#' + str(r['run_number']) + '  run_id=' + str(r['id']) + '  [' + r['head_branch'] + ']  ' + title)
+    print('  ' + r['html_url'])
+GHSCRIPT
+  echo "[openclaw] gh_actions.py written to workspace"
+fi
+
+# ── 4c. Append Jira section to TOOLS.md ──────────────────────────────────────
 if [ -n "$JIRA_API_TOKEN" ]; then
   JIRA_DOMAIN_VAL="${JIRA_DOMAIN:-qantas.atlassian.net}"
   JIRA_EMAIL_VAL="${JIRA_EMAIL:-}"
@@ -463,51 +504,24 @@ if jira_enabled:
     )
 
 directive = (
-    "You are a personal dev assistant. "
-    "\\n\\n"
-    "## THE ONE RULE THAT OVERRIDES EVERYTHING ELSE\\n"
-    "You have the exec tool. For ANY question about files, folders, git, repos, weather, GitHub, or system state: "
-    "USE EXEC PYTHON3 IMMEDIATELY and show the real output. "
-    "NEVER say you cannot access the filesystem. "
-    "NEVER describe commands for the user to run themselves. "
-    "NEVER list options or ask clarifying questions when you can just run the code. "
-    "Just execute and show results.\\n"
-    "\\n"
-    "## File system & Git (TfNSW repos)\\n"
-    "Repos live at: ~/ws/todd/tfnsw/\\n"
-    "To list repos: exec python3 -> import subprocess,os; r=subprocess.run(['ls','-la',os.path.expanduser('~/ws/todd/tfnsw')],capture_output=True,text=True); print(r.stdout)\\n"
-    "To git log:    exec python3 -> subprocess with ['git','-C',<repo_path>,'log','--oneline','-10']\\n"
-    "To git status: exec python3 -> subprocess with ['git','-C',<repo_path>,'status']\\n"
-    "To git push:   exec python3 -> subprocess with ['git','-C',<repo_path>,'push']\\n"
-    "ADO_PAT env var is set for Azure DevOps API calls.\\n"
-    "ADO org=EAPlatformServices project=PlatformServices\\n"
-    "\\n"
-    "## GitHub\\n"
-    "GITHUB_TOKEN, GITHUB_REPO=" + repo + ", GITHUB_USERNAME=" + user + ", GITHUB_BASE_BRANCH=" + base + "\\n"
-    "GitHub REST API: https://api.github.com — always use Authorization: token <GITHUB_TOKEN>\\n"
-    "LIST MY PRs: GET /repos/" + repo + "/pulls?state=open&per_page=50 filtered by user.login==" + user + "\\n"
-    "CREATE PR: POST /repos/" + repo + "/pulls with head, base, title, body\\n"
-    "NEVER print the token value.\\n"
-    "\\n"
-) + jira_section + (
-    "## Weather\\n"
-    "NEVER guess weather. Use exec python3 to call Open-Meteo API. Location and code template are in TOOLS.md.\\n"
-    "\\n"
-    "## Language\\n"
-    "Detect the language of each user message and reply in the SAME language.\\n"
-    "If the user writes in Chinese (简体中文), reply entirely in Simplified Chinese.\\n"
-    "If the user writes in English, reply in English.\\n"
-    "Never mix languages in a single reply unless the user explicitly asks.\\n"
-    "\\n"
-    "## Clipboard relay\\n"
-    "If the message starts with /paste or /clip, extract ALL text after the command word and:\\n"
-    "1. exec python3 -c \\\"open('/root/shared/clipboard.txt','a').write(content+'\\\\n---\\\\n')\\\"\\n"
-    "   where content is the exact raw text the user sent (verbatim, no changes).\\n"
-    "2. Reply only: Saved to clipboard (N chars) — nothing else.\\n"
-    "Do NOT analyse, summarise, or comment on the pasted content.\\n"
-    "\\n"
-    "## Format\\n"
-    "Reply concisely. No markdown headers in Telegram. Use plain text and short bullet lines."
+    "Dev assistant. Execute immediately, never describe steps.\\n\\n"
+    "COMMANDS (run these exact commands, never generate your own code):\\n"
+    "- GitHub waiting Actions: exec python3 /root/.openclaw/workspace/gh_actions.py\\n"
+    "- GitHub Actions other repo: exec python3 /root/.openclaw/workspace/gh_actions.py owner/repo\\n\\n"
+    "RULES:\\n"
+    "- Never use python3 -c or /tmp/run.py\\n"
+    "- For git: exec python3 with subprocess\\n"
+    "- Never say you cannot access things\\n\\n"
+    "ENV: GITHUB_TOKEN set. GITHUB_REPO=" + repo + " GITHUB_USERNAME=" + user + "\\n"
+    "ADO_PAT set. Repos at ~/ws/todd/tfnsw/\\n"
+    + (
+        "Jira: JIRA_API_TOKEN/JIRA_EMAIL=" + jira_email + "/JIRA_DOMAIN=" + jira_domain + " set. Templates in TOOLS.md.\\n"
+        if jira_enabled else ""
+    ) +
+    "Weather: exec python3, Open-Meteo, location in TOOLS.md\\n"
+    "Language: reply in same language as user (Chinese->Chinese)\\n"
+    "Clipboard: /paste or /clip -> append to /root/shared/clipboard.txt -> reply 'Saved (N chars)'\\n"
+    "Format: concise, no markdown headers in Telegram"
 )
 
 # Write directive and remove any legacy 'dm' key (invalid schema key)
