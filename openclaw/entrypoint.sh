@@ -33,13 +33,34 @@ fi
 # Always ensure auth mode and origin settings are applied
 openclaw config set gateway.auth.mode token 2>/dev/null || true
 openclaw config set gateway.controlUi.allowedOrigins '["https://localhost:18790","https://172.25.75.125:18790"]' 2>/dev/null || true
+# Trust the fixed Docker bridge subnet (172.30.0.0/24) so Caddy reverse proxy headers are accepted
+openclaw config set gateway.trustedProxies '["172.30.0.0/24"]' 2>/dev/null || true
 
 # ── 3b. Exec tool — allow safe binaries the agent may call ───────────────────
 openclaw config set tools.exec.security full 2>/dev/null || true
 openclaw config set tools.exec.safeBins '["curl","python3","git"]' 2>/dev/null || true
 openclaw config set tools.exec.safeBinProfiles.git '{"allowedValueFlags":["-C","--work-tree","--git-dir","--no-pager","log","status","diff","push","pull","fetch","branch","checkout","rev-parse","--abbrev-ref","HEAD","--oneline","--stat","-n","--decorate","--all","-10","-20"]}' 2>/dev/null || true
-# Allow git to operate on bind-mounted host repos (different uid ownership)
-git config --global --add safe.directory /root/ws/todd/tfnsw/azure-devops-pipeline-template 2>/dev/null || true
+# Shared clipboard — ensure file exists and is world-writable so the WSL host user can read/touch it
+touch /root/shared/clipboard.txt 2>/dev/null || true
+chmod 666 /root/shared/clipboard.txt 2>/dev/null || true
+
+# Allow git to operate on ALL bind-mounted host repos (different uid ownership)
+# Dynamically discover every repo under tfnsw and mark it safe
+for repo_dir in /root/ws/todd/tfnsw/*/; do
+  [ -d "$repo_dir/.git" ] && git config --global --add safe.directory "$repo_dir" 2>/dev/null || true
+done
+git config --global --add safe.directory /root/ws/todd/tfnsw 2>/dev/null || true
+
+# Configure ADO credentials so git pull/push works non-interactively
+# Uses the ADO_PAT env var; safe because this container is single-user personal use
+if [ -n "$ADO_PAT" ]; then
+  git config --global credential.helper store
+  printf 'https://EAPlatformServices:%s@dev.azure.com\n' "$ADO_PAT" \
+    > /root/.git-credentials
+  chmod 600 /root/.git-credentials
+  git config --global url."https://EAPlatformServices:${ADO_PAT}@dev.azure.com".insteadOf \
+    "https://dev.azure.com" 2>/dev/null || true
+fi
 # Empty profiles = no flag restrictions; required or the binaries are silently ignored
 openclaw config set tools.exec.safeBinProfiles.curl '{"allowedValueFlags":["-H","-X","-d","-o","-s","-f","-L","-u","-A","-b","-c","-e","--header","--request","--data","--output","--silent","--fail","--location","--user","--user-agent","--cookie","--cookie-jar","--referer","--max-time","--connect-timeout","-m","--url"]}' 2>/dev/null || true
 openclaw config set tools.exec.safeBinProfiles.python3 '{"allowedValueFlags":["-c","-m","-u","-W","-E"]}' 2>/dev/null || true
@@ -258,6 +279,69 @@ for pr in prs["value"]:
 TOOLS_APPEND
 echo "[openclaw] Weather + TfNSW sections appended to TOOLS.md"
 fi
+
+# ── 4b. Append Jira section to TOOLS.md ──────────────────────────────────────
+if [ -n "$JIRA_API_TOKEN" ]; then
+  JIRA_DOMAIN_VAL="${JIRA_DOMAIN:-qantas.atlassian.net}"
+  JIRA_EMAIL_VAL="${JIRA_EMAIL:-}"
+  cat >> "${HOME}/.openclaw/workspace/TOOLS.md" << JIRA_APPEND
+
+## Jira
+
+**NEVER guess or hallucinate Jira data. Always use exec python3 with the Jira REST API.**
+
+These env vars are available in exec python3:
+- JIRA_API_TOKEN: set
+- JIRA_EMAIL: ${JIRA_EMAIL_VAL}
+- JIRA_DOMAIN: ${JIRA_DOMAIN_VAL}
+
+### Create a subtask under a parent issue — exec this immediately:
+\`\`\`python
+import os, json, urllib.request, base64
+domain = os.environ['JIRA_DOMAIN']
+email  = os.environ['JIRA_EMAIL']
+token  = os.environ['JIRA_API_TOKEN']
+auth   = base64.b64encode((email + ':' + token).encode()).decode()
+hdrs = {'Authorization': 'Basic ' + auth, 'Content-Type': 'application/json', 'Accept': 'application/json'}
+parent_key    = 'DATAPLATCORE-783'
+subtask_title = 'run time error'
+subtask_desc  = 'there is task ecs timeout error'
+req = urllib.request.Request('https://' + domain + '/rest/api/3/issue/' + parent_key + '?fields=project', headers=hdrs)
+proj = json.load(urllib.request.urlopen(req))['fields']['project']['key']
+body = json.dumps({'fields': {'project': {'key': proj}, 'parent': {'key': parent_key}, 'summary': subtask_title, 'description': {'type': 'doc', 'version': 1, 'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': subtask_desc}]}]}, 'issuetype': {'name': 'Sub-task'}}}).encode()
+req2 = urllib.request.Request('https://' + domain + '/rest/api/3/issue', data=body, headers=hdrs)
+r = json.load(urllib.request.urlopen(req2))
+print('Created: ' + r['key'] + '  https://' + domain + '/browse/' + r['key'])
+\`\`\`
+
+### Get issue details — exec this immediately:
+\`\`\`python
+import os, json, urllib.request, base64
+domain = os.environ['JIRA_DOMAIN']
+auth   = base64.b64encode((os.environ['JIRA_EMAIL'] + ':' + os.environ['JIRA_API_TOKEN']).encode()).decode()
+key    = 'DATAPLATCORE-783'
+issue  = json.load(urllib.request.urlopen(urllib.request.Request('https://' + domain + '/rest/api/3/issue/' + key, headers={'Authorization': 'Basic ' + auth, 'Accept': 'application/json'})))
+f = issue['fields']
+print(issue['key'] + ': ' + f['summary'])
+print('Status: ' + f['status']['name'] + '  Type: ' + f['issuetype']['name'])
+for s in f.get('subtasks', []):
+    print('  ' + s['key'] + ': ' + s['fields']['summary'])
+\`\`\`
+
+### Search issues (JQL) — exec this immediately:
+\`\`\`python
+import os, json, urllib.request, urllib.parse, base64
+domain = os.environ['JIRA_DOMAIN']
+auth   = base64.b64encode((os.environ['JIRA_EMAIL'] + ':' + os.environ['JIRA_API_TOKEN']).encode()).decode()
+jql    = 'assignee = currentUser() AND status != Done ORDER BY updated DESC'
+data   = json.load(urllib.request.urlopen(urllib.request.Request('https://' + domain + '/rest/api/3/search?jql=' + urllib.parse.quote(jql) + '&maxResults=20', headers={'Authorization': 'Basic ' + auth, 'Accept': 'application/json'})))
+for i in data['issues']:
+    print(i['key'] + ': ' + i['fields']['summary'] + ' [' + i['fields']['status']['name'] + ']')
+\`\`\`
+JIRA_APPEND
+  echo "[openclaw] Jira section appended to TOOLS.md"
+fi
+
 cat > "$AGENT_DIR/auth-profiles.json" << EOF
 {
   "version": 1,
@@ -295,8 +379,8 @@ except Exception as e:
 model_entries = []
 for m in tags:
     name = m.get("name", "")
-    # qwen3:14b-fast — smaller context, thinking disabled via providerOptions
-    is_fast = name == "qwen3:14b-fast"
+    # <model>-fast — smaller context, thinking disabled via providerOptions
+    is_fast = name == "$MODEL_NAME-fast"
     entry = {
         "id":            name,
         "name":          name,
@@ -347,7 +431,7 @@ fi
 # ── 6c. GitHub PR directive — inject system prompt for Telegram DMs ──────────
 if [ -n "$GITHUB_TOKEN" ]; then
   echo "[openclaw] Configuring GitHub PR agent directive ..."
-  python3 - << PYEOF
+  python3 - << 'PYEOF'
 import json, os
 
 cfg_file = os.path.join(os.path.expanduser('~'), '.openclaw', 'openclaw.json')
@@ -357,9 +441,26 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 
-repo   = os.environ.get('GITHUB_REPO', 'unknown/repo')
-user   = os.environ.get('GITHUB_USERNAME', 'unknown')
-base   = os.environ.get('GITHUB_BASE_BRANCH', 'master')
+repo         = os.environ.get('GITHUB_REPO', 'unknown/repo')
+user         = os.environ.get('GITHUB_USERNAME', 'unknown')
+base         = os.environ.get('GITHUB_BASE_BRANCH', 'master')
+jira_domain  = os.environ.get('JIRA_DOMAIN', '')
+jira_email   = os.environ.get('JIRA_EMAIL', '')
+jira_enabled = bool(os.environ.get('JIRA_API_TOKEN', ''))
+
+jira_section = ""
+if jira_enabled:
+    jira_section = (
+        "## Jira\\n"
+        "JIRA_API_TOKEN is set. JIRA_EMAIL=" + jira_email + " JIRA_DOMAIN=" + jira_domain + "\\n"
+        "Auth: Basic base64(JIRA_EMAIL:JIRA_API_TOKEN).\\n"
+        "CREATE SUBTASK: POST /rest/api/3/issue — fields: project.key, parent.key, summary, description (ADF doc format), issuetype.name=Sub-task.\\n"
+        "GET ISSUE: GET /rest/api/3/issue/{key}.\\n"
+        "SEARCH: GET /rest/api/3/search?jql=<url-encoded JQL>.\\n"
+        "Full ready-to-run code templates are in TOOLS.md under ## Jira.\\n"
+        "NEVER print the token value.\\n"
+        "\\n"
+    )
 
 directive = (
     "You are a personal dev assistant. "
@@ -388,8 +489,22 @@ directive = (
     "CREATE PR: POST /repos/" + repo + "/pulls with head, base, title, body\\n"
     "NEVER print the token value.\\n"
     "\\n"
+) + jira_section + (
     "## Weather\\n"
     "NEVER guess weather. Use exec python3 to call Open-Meteo API. Location and code template are in TOOLS.md.\\n"
+    "\\n"
+    "## Language\\n"
+    "Detect the language of each user message and reply in the SAME language.\\n"
+    "If the user writes in Chinese (简体中文), reply entirely in Simplified Chinese.\\n"
+    "If the user writes in English, reply in English.\\n"
+    "Never mix languages in a single reply unless the user explicitly asks.\\n"
+    "\\n"
+    "## Clipboard relay\\n"
+    "If the message starts with /paste or /clip, extract ALL text after the command word and:\\n"
+    "1. exec python3 -c \\\"open('/root/shared/clipboard.txt','a').write(content+'\\\\n---\\\\n')\\\"\\n"
+    "   where content is the exact raw text the user sent (verbatim, no changes).\\n"
+    "2. Reply only: Saved to clipboard (N chars) — nothing else.\\n"
+    "Do NOT analyse, summarise, or comment on the pasted content.\\n"
     "\\n"
     "## Format\\n"
     "Reply concisely. No markdown headers in Telegram. Use plain text and short bullet lines."
@@ -436,11 +551,11 @@ try:
     data = json.load(open(f))
 except Exception:
     data = {}
-# Build desired entries with providerOptions for qwen3:14b-fast
+# Build desired entries with providerOptions for <model>-fast variant
 entries = []
 for m in tags:
     n = m['name']
-    fast = n == 'qwen3:14b-fast'
+    fast = n == '$MODEL_NAME-fast'
     e = {'id':n,'name':n,'reasoning':False,'input':['text'],'cost':{'input':0,'output':0,'cacheRead':0,'cacheWrite':0},'contextWindow':8192 if fast else 32768,'maxTokens':4096 if fast else 8192}
     if fast:
         e['providerOptions'] = {'ollama': {'think': False}}

@@ -1,0 +1,9 @@
+TEST2: permissions fixed
+---
+warnings
+---
+ERROR: NullPointerException at line 42 warnings /think
+---how are you
+---
+2026-03-17T09:09:12.3135123Z ERROR tests/dags/test_jinja2_template.py::test_airflow_jinja_objects[conf_operators__default_owner] - ImportError: cannot import name 'DagRunTriggeredByType' from 'airflow.utils.types' (/home/ubuntu/.cache/pypoetry/virtualenvs/edr-airflow-dags-vFGOxLRE-py3.12/lib/python3.12/site-packages/airflow/utils/types.py)
+---

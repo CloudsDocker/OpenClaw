@@ -2,6 +2,10 @@
   local_certs
 }
 
+http://localhost:18788, http://127.0.0.1:18788, http://172.25.75.125:18788 {
+  redir https://{host}:18790{uri} permanent
+}
+
 localhost:18790, 127.0.0.1:18790, 172.25.75.125:18790 {
   tls internal
 
